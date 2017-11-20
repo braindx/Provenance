@@ -48,6 +48,7 @@ typedef NS_ENUM(NSInteger, PVEmulatorCoreErrorCode) {
 @property (nonatomic, assign) double emulationFPS;
 
 @property (nonatomic, copy) NSString *romName;
+@property (nonatomic, copy) NSString *romMD5;
 @property (nonatomic, copy) NSString *saveStatesPath;
 @property (nonatomic, copy) NSString *batterySavesPath;
 @property (nonatomic, copy) NSString *BIOSPath;
@@ -100,6 +101,7 @@ typedef NS_ENUM(NSInteger, GameSpeed) {
 
 - (void)loadSaveFile:(NSString *)path forType:(int)type;
 - (void)writeSaveFile:(NSString *)path forType:(int)type;
+- (void)syncCloudFile:(NSString*)filename toURL:(NSURL*)fileURL;
 
 - (BOOL)autoSaveState;
 - (BOOL)saveStateToFileAtPath:(NSString *)path;

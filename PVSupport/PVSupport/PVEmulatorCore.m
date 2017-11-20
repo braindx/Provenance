@@ -7,6 +7,7 @@
 //
 
 #import "PVEmulatorCore.h"
+#import <CloudKit/CloudKit.h>
 #import "NSObject+PVAbstractAdditions.h"
 #import "OERingBuffer.h"
 #import "RealTimeThread.h"
@@ -339,7 +340,12 @@ NSString *const PVEmulatorCoreErrorDomain = @"com.jamsoftonline.EmulatorCore.Err
 - (BOOL)autoSaveState
 {
     NSString *autoSavePath = [[self saveStatesPath] stringByAppendingPathComponent:@"auto.svs"];
-    return [self saveStateToFileAtPath:autoSavePath];
+    BOOL saveResult = [self saveStateToFileAtPath:autoSavePath];
+    if ( saveResult )
+    {
+        [self syncCloudFile:[[self romMD5] stringByAppendingPathExtension:@"svs"] toURL:[NSURL fileURLWithPath:autoSavePath]];
+    }
+    return saveResult;
 }
 
 - (BOOL)saveStateToFileAtPath:(NSString *)path
@@ -362,6 +368,94 @@ NSString *const PVEmulatorCoreErrorDomain = @"com.jamsoftonline.EmulatorCore.Err
 - (void)writeSaveFile:(NSString *)path forType:(int)type
 {
 	[self doesNotImplementSelector:_cmd];
+}
+
+- (void)syncCloudFile:(NSString *)filename toURL:(NSURL *)fileURL
+{
+    NSLog( @"Syncing cloud file: %@", filename );
+    
+    bool fileExists = [fileURL checkResourceIsReachableAndReturnError:NULL];
+    NSDate* fileDate = NULL;
+    if ( fileExists )
+    {
+        NSLog( @"File exists." );
+        [fileURL getResourceValue:&fileDate forKey:NSURLContentModificationDateKey error:NULL];
+    }
+    else
+    {
+        NSLog( @"File does not exist." );
+    }
+    
+    if ( fileDate != NULL )
+    {
+        NSLog( @"File date: %@", fileDate );
+    }
+    
+    NSString* containerIdentifier = [[[CKContainer defaultContainer] containerIdentifier] stringByReplacingOccurrencesOfString:@"provenancetv" withString:@"provenance"];
+    CKDatabase* privateCloudDatabase = [[CKContainer containerWithIdentifier:containerIdentifier] privateCloudDatabase];
+    CKRecordID* saveRecordID = [[CKRecordID alloc] initWithRecordName:filename];
+    
+    dispatch_group_t group = dispatch_group_create();
+    dispatch_group_enter( group );
+    
+    [privateCloudDatabase fetchRecordWithID:saveRecordID completionHandler:^(CKRecord * _Nullable record, NSError * _Nullable error)
+    {
+        bool iCloudRecordIsNewer = false;
+        bool iCloudRecordIsOlder = true;
+        if ( error == NULL && record != NULL )
+        {
+            NSLog( @"Successfully retrieved cloud save." );
+            NSDate* recordDate = record[@"date"];
+            NSLog( @"Record Date: %@", recordDate );
+            if ( fileDate == NULL || [recordDate compare:fileDate] == NSOrderedDescending )
+            {
+                NSLog( @"iCloud record is newer." );
+                iCloudRecordIsNewer = true;
+                iCloudRecordIsOlder = false;
+                CKAsset* asset = record[@"asset"];
+                [[NSFileManager defaultManager] removeItemAtURL:fileURL error:nil];
+                [[NSFileManager defaultManager] copyItemAtURL:[asset fileURL] toURL:fileURL error:NULL];
+            }
+            else if ( fileDate != NULL && [recordDate compare:fileDate] == NSOrderedSame )
+            {
+                iCloudRecordIsOlder = false;
+            }
+            else
+            {
+                NSLog( @"Record date: %@", recordDate );
+            }
+        }
+        else if ( error != NULL )
+        {
+            NSLog( @"Error retrieving cloud save: %@", error.localizedDescription );
+        }
+        
+        if ( iCloudRecordIsOlder && fileDate != NULL && fileExists )
+        {
+            NSLog( @"Uploading cloud save." );
+            record = [[CKRecord alloc] initWithRecordType:@"CloudSave" recordID:saveRecordID];
+            record[@"date"] = fileDate;
+            record[@"asset"] = [[CKAsset alloc] initWithFileURL:fileURL];
+            CKModifyRecordsOperation* modifyRecordsOperation = [[CKModifyRecordsOperation alloc] initWithRecordsToSave:[NSArray arrayWithObject:record] recordIDsToDelete:nil];
+            modifyRecordsOperation.savePolicy = CKRecordSaveAllKeys;
+            modifyRecordsOperation.qualityOfService = NSQualityOfServiceUserInitiated;
+            modifyRecordsOperation.modifyRecordsCompletionBlock = ^(NSArray<CKRecord *> * _Nullable savedRecords, NSArray<CKRecordID *> * _Nullable deletedRecordIDs, NSError * _Nullable operationError)
+            {
+                if ( operationError != NULL )
+                {
+                    NSLog( @"Error while uploading cloud save: %@", operationError.localizedDescription );
+                }
+                dispatch_group_leave( group );
+            };
+            [privateCloudDatabase addOperation:modifyRecordsOperation];
+        }
+        else
+        {
+            dispatch_group_leave( group );
+        }
+    }];
+    
+    dispatch_group_wait( group, DISPATCH_TIME_FOREVER );
 }
 
 @end

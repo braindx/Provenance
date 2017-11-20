@@ -236,6 +236,7 @@ void uncaughtExceptionHandler(NSException *exception)
 		[self.menuButton setHidden:YES];
 	}
 
+    self.emulatorCore.romMD5 = [self.game md5Hash];
     if (![self.emulatorCore loadFileAtPath:[[self documentsPath] stringByAppendingPathComponent:[self.game romPath]]])
     {
         __weak typeof(self) weakSelf = self;
@@ -264,7 +265,9 @@ void uncaughtExceptionHandler(NSException *exception)
     [self.gameAudio startAudio];
 
 	NSString *saveStatePath = [self saveStatePath];
+    
 	NSString *autoSavePath = [saveStatePath stringByAppendingPathComponent:@"auto.svs"];
+    [self.emulatorCore syncCloudFile:[[self.emulatorCore romMD5] stringByAppendingPathExtension:@"svs"] toURL:[NSURL fileURLWithPath:autoSavePath]];
 	if ([[NSFileManager defaultManager] fileExistsAtPath:autoSavePath])
 	{
 		BOOL shouldAskToLoadSaveState = [[PVSettingsModel sharedInstance] askToAutoLoad];
